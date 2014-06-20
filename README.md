@@ -9,6 +9,8 @@ Makes it easy to take input on pipe, and shut it down.
 import (
 	"github.com/chrhlnd/pipein"
 	"os/signal"
+	"os"
+	"fmt"
 )
 
 func main() {
@@ -37,7 +39,7 @@ func main() {
 	}
 
 	<-shutdown
-	os.Exit("Shutdown clean")
+	fmt.Printf("Shutdown clean\n")
 }
 ```
 
