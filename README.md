@@ -31,6 +31,9 @@ func main() {
 			case d := <-data:
 				fmt.Printf("%v",string(d))
 				break
+			case e := <-errs:
+				fmt.Printf("ERR: %v\n",e)
+				break
 			case <-sig:
 				done = true
 				shutdown <- true
