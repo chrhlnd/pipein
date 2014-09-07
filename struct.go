@@ -3,126 +3,112 @@ package pipein
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"syscall"
-)
 
-const GROW_SZ = 2048
+	"code.google.com/p/go.exp/inotify"
+)
 
 type PipeConnection struct{}
 
-func NewPipeIn() Reader {
+func NewPipeIn() FifoReader {
 	return &PipeConnection{}
 }
 
-func (p *PipeConnection) Connect(addr string, shutdown chan bool) (<-chan []byte, <-chan error) {
+const GROW_SIZE = 1024 * 4
+
+func (p *PipeConnection) Connect(addr string, output chan<- []byte, shutdown chan bool) <-chan error {
 	mine := false
-	done := false
 
-	errors := make(chan error)
+	var err error
+	var fi os.FileInfo
 
-	if fi, err := os.Stat(addr); os.IsNotExist(err) {
+	errors := make(chan error, 1)
+
+	if fi, err = os.Stat(addr); os.IsNotExist(err) {
 		if err = syscall.Mknod(addr, syscall.S_IFIFO|0666, 0); err != nil {
-			go func() {
-				errors <- fmt.Errorf("Failed creating %v err %v", addr, err)
-			}()
-			return nil, errors
+			errors <- fmt.Errorf("Failed creating %v err %v", addr, err)
+			return errors
 		}
 		mine = true
 	} else if (fi.Mode() & os.ModeNamedPipe) == 0 {
-		go func() {
-			errors <- fmt.Errorf("%v must be a pipe", addr)
-		}()
-		return nil, errors
+		errors <- fmt.Errorf("%v must be a pipe", addr)
+		return errors
 	}
 
-	output := make(chan []byte)
+	var watcher *inotify.Watcher
 
-	writeDone := func() {
-		done = true
-
-		f, err := os.OpenFile(addr, os.O_WRONLY, 0)
-		if err != nil {
-			errors <- fmt.Errorf("Failed writing done to %v err %v", addr, err)
-			return
-		}
-
-		_, err = f.Write([]byte("fin!"))
-		if err != nil {
-			errors <- fmt.Errorf("Failed sending done message to %v err %v", addr, err)
-			return
-		}
-		err = f.Close()
-		if err != nil {
-			errors <- fmt.Errorf("Failed to close after writing done @ %v err %v", addr, err)
-			return
-		}
+	if watcher, err = inotify.NewWatcher(); err != nil {
+		errors <- err
+		return errors
 	}
 
-	pump := func() {
-		var buffer []byte
-		var pos int
-		var current []byte
-		var n int
+	if err = watcher.AddWatch(addr, inotify.IN_OPEN); err != nil {
+		errors <- err
+		return errors
+	}
 
-		for !done {
-			buffer = make([]byte, GROW_SZ)
-			current = buffer[0:]
-			pos = 0
+	var input *os.File
 
-			f, err := os.Open(addr)
-			if err != nil {
-				errors <- fmt.Errorf("Failed to access %v err %v", addr, err)
-				continue
+	readData := func() {
+		buffer := make([]byte, GROW_SIZE)
+		current := buffer[0:]
+		pos := 0
+		n := 0
+
+	BUFFER:
+		for {
+			n, err = input.Read(current)
+
+			if err != nil && err != io.EOF {
+				errors <- fmt.Errorf("Failed to read %v err %v", addr, err)
+				break BUFFER
 			}
 
-			if done {
-				break
+			if n < len(buffer) {
+				break BUFFER
 			}
 
-			for !done {
-				n, err = f.Read(current)
-				if err != nil && err != io.EOF {
-					errors <- fmt.Errorf("Failed to read %v err %v", addr, err)
-				}
-				if n < len(buffer) {
-					break
-				}
-				pos = len(buffer)
-				buffer = append(buffer, make([]byte, GROW_SZ)...)
-				current = buffer[pos:]
-			}
-
-			err = f.Close()
-			if err != nil {
-				errors <- fmt.Errorf("Pump loop failed closing %v err %v", addr, err)
-			}
-
-			if done {
-				break
-			}
-
-			output <- buffer
+			pos = len(buffer)
+			buffer = append(buffer, make([]byte, GROW_SIZE)...)
+			current = buffer[pos:]
 		}
+
+		output <- buffer[0 : pos+n]
 	}
 
 	go func() {
-		go pump()
+		if input, err = os.Open(addr); err != nil {
+			errors <- err
+		} else {
+		WORK:
+			for {
+				select {
+				case <-watcher.Event:
+					readData()
+				case <-shutdown:
+					log.Printf("Shutting down pipe %v", addr)
+					break WORK
+				}
+			}
+		}
 
-		select {
-		case <-shutdown:
-			done = true
-			writeDone()
+		if err = input.Close(); err != nil {
+			errors <- err
 		}
 
 		if mine {
 			err := os.Remove(addr)
 			if err != nil {
-				errors <- fmt.Errorf("Failed removing %v err %v", addr, err)
+				errors <- fmt.Errorf("Err on %v err %v", addr, err)
 			}
 		}
+
+		watcher.Close()
+
 		shutdown <- true
 	}()
 
-	return output, errors
+	return errors
 }

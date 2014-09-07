@@ -1,11 +1,3 @@
-pipein
-=======
-
-Small library to capture input on a named pipe.
-
-Makes it easy to take input on pipe, and shut it down.
-
-```
 package main
 
 import (
@@ -50,12 +42,3 @@ WORK:
 	<-shutdown
 	fmt.Printf("Shutdown clean\n")
 }
-```
-
-Echo program sample. It captures data piped to the fifo. Then prints it.
-
-On interrupt it cleanly shuts down.
-
-The shutdown channel is bi directional.. Send to it to cause shutdown. Read from it to know its shutdown.
-
-

@@ -1,7 +1,7 @@
 package pipein
 
 // Reader connection to a system FIFO
-type Reader interface {
+type FifoReader interface {
 	// Connect to a file fifo, shutdown channel is bidirectional -> means stop <- stopped
-	Connect(addr string, shutdown chan bool) (<-chan []byte, <-chan error)
+	Connect(addr string, output chan<- []byte, shutdown chan bool) <-chan error
 }
