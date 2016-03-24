@@ -7,7 +7,7 @@ import (
 	"os"
 	"syscall"
 
-	"code.google.com/p/go.exp/inotify"
+	"golang.org/x/exp/inotify"
 )
 
 type PipeConnection struct{}
