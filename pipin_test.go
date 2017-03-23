@@ -79,6 +79,8 @@ func TestPipeIn(t *testing.T) {
 				return
 			}
 
+			log.Print("Done ", msg)
+
 		}(i)
 	}
 	wg.Wait()
